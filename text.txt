@@ -1,0 +1,216 @@
+Avval project strukturasini ko'rib chiqaman.
+
+  Searched for 1 pattern, read 2 files, listed 1 directory (ctrl+o to expand)
+
+● Endi to'liq deployment qo'llanmasini beraman.
+
+  ---
+  Django + Nginx + Gunicorn — Server Deploy Qilish
+  
+  Sizning projectingiz: Django 6, PostgreSQL, .env fayl orqali konfiguratsiya.
+
+  ---
+  1. Server tayyorlash (Ubuntu/Debian)
+
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install python3 python3-pip python3-venv nginx postgresql postgresql-contrib git -y
+
+  ---
+  2. PostgreSQL sozlash
+  
+  sudo -u postgres psql
+
+  CREATE DATABASE kms_db;
+  CREATE USER kms_user WITH PASSWORD 'strong_password';
+  ALTER ROLE kms_user SET client_encoding TO 'utf8';
+  ALTER ROLE kms_user SET default_transaction_isolation TO 'read committed';
+  GRANT ALL PRIVILEGES ON DATABASE kms_db TO kms_user;
+  \q
+
+  ---
+  3. Kodni serverga yuklash
+
+  cd /var/www
+  sudo git clone https://github.com/yourrepo/kms-python.git
+  sudo chown -R $USER:$USER /var/www/kms-python
+  cd /var/www/kms-python/kms
+
+  ---
+  4. Virtual environment va requirements
+
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  pip install gunicorn   # WSGI server
+
+  ---
+  5. .env fayl yaratish
+  
+  nano /var/www/kms-python/kms/.env
+
+  Ichiga yozing:
+
+  SECRET_KEY=super-secret-production-key-here
+  DEBUG=False
+  ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,123.45.67.89
+
+  DB_NAME=kms_db
+  DB_USER=kms_user
+  DB_PASSWORD=strong_password
+  DB_HOST=localhost
+  DB_PORT=5432
+  
+  ▎ Muhim: settings.pyda DATABASES PostgreSQL ga ulangan bo'lishi kerak. Agar hali bo'lmasa, quyidagicha bo'lishi lozim:
+
+  DATABASES = {
+      'default': {
+          'ENGINE': 'django.db.backends.postgresql',
+          'NAME': os.environ.get('DB_NAME'),
+          'USER': os.environ.get('DB_USER'),
+          'PASSWORD': os.environ.get('DB_PASSWORD'),
+          'HOST': os.environ.get('DB_HOST', 'localhost'),
+          'PORT': os.environ.get('DB_PORT', '5432'),
+      }
+  }
+  
+  ---
+  6. Static fayllar va migration
+
+  source venv/bin/activate
+  cd /var/www/kms-python/kms
+  
+  python manage.py migrate
+  python manage.py collectstatic --noinput
+  python manage.py createsuperuser
+  
+  ---
+  7. Gunicorn sozlash (systemd service)
+
+  sudo nano /etc/systemd/system/kms.service
+
+  [Unit]
+  Description=KMS Django Gunicorn
+  After=network.target
+
+  [Service]
+  User=www-data
+  Group=www-data
+  WorkingDirectory=/var/www/kms-python/kms
+  ExecStart=/var/www/kms-python/kms/venv/bin/gunicorn \
+      --workers 3 \
+      --bind unix:/run/kms.sock \
+      config.wsgi:application
+  Restart=on-failure
+
+  [Install]
+  WantedBy=multi-user.target
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable kms
+  sudo systemctl start kms
+  sudo systemctl status kms   # running bo'lishi kerak
+
+  ▎ Workers soni: 2 * CPU_count + 1 — masalan 2 CPU bo'lsa → 5 worker.
+
+  ---
+  8. Nginx sozlash
+
+  sudo nano /etc/nginx/sites-available/kms
+
+  server {
+      listen 80;
+      server_name yourdomain.com www.yourdomain.com;
+
+      # Static fayllar
+      location /static/ {
+          alias /var/www/kms-python/kms/static/;
+      }
+
+      # Media fayllar
+      location /media/ {
+          alias /var/www/kms-python/kms/media/;
+      }
+
+      # Django app ga proxy
+      location / {
+          include proxy_params;
+          proxy_pass http://unix:/run/kms.sock;
+      }
+  }
+
+  sudo ln -s /etc/nginx/sites-available/kms /etc/nginx/sites-enabled/
+  sudo nginx -t        # config to'g'ri ekanini tekshirish
+  sudo systemctl restart nginx
+
+  ---
+  9. Firewall
+
+  sudo ufw allow 'Nginx Full'
+  sudo ufw allow OpenSSH
+  sudo ufw enable
+
+  ---
+  10. SSL (HTTPS) — Certbot bilan
+
+  sudo apt install certbot python3-certbot-nginx -y
+  sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+  Certbot Nginx configni avtomatik HTTPS ga o'zgartiradi.
+
+  ---
+  Tezkor tekshirish komandalar
+
+  sudo systemctl status kms          # Gunicorn holati
+  sudo journalctl -u kms -n 50       # Gunicorn loglari
+  sudo systemctl status nginx        # Nginx holati
+  sudo nginx -t                      # Nginx config tekshirish
+
+  ---
+  Arxitektura qisqacha
+  
+  Internet → Nginx (80/443)
+                ↓
+           Unix Socket (.sock)
+                ↓
+           Gunicorn (WSGI)
+                ↓
+           Django App
+  sudo systemctl restart nginx
+
+  ---
+  9. Firewall
+
+  sudo ufw allow 'Nginx Full'
+  sudo ufw allow OpenSSH
+  sudo ufw enable
+
+  ---
+  10. SSL (HTTPS) — Certbot bilan
+
+  sudo apt install certbot python3-certbot-nginx -y
+  sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+
+  Certbot Nginx configni avtomatik HTTPS ga o'zgartiradi.
+
+  ---
+  Tezkor tekshirish komandalar
+
+  sudo systemctl status kms          # Gunicorn holati
+  sudo journalctl -u kms -n 50       # Gunicorn loglari
+  sudo systemctl status nginx        # Nginx holati
+  sudo nginx -t                      # Nginx config tekshirish
+
+  ---
+  Arxitektura qisqacha
+
+  Internet → Nginx (80/443)
+                ↓
+           Unix Socket (.sock)
+                ↓
+           Gunicorn (WSGI)
+                ↓
+           Django App
+                ↓
+           PostgreSQL
+
+  Nginx — static/media fayllarni o'zi beradi, dinamik so'rovlarni esa Gunicorn orqali Django ga uzatadi.
