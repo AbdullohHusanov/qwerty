@@ -1,3 +1,82 @@
+  kms.service — AAPanel uchun
+
+  [Unit]
+  Description=KMS Django Gunicorn
+  After=network.target
+
+  [Service]
+  User=www
+  Group=www
+  WorkingDirectory=/www/wwwroot/172.25.25.104/kms-py/kms
+  ExecStart=/www/wwwroot/172.25.25.104/kms-py/kms/venv/bin/gunicorn \
+      --workers 3 \
+      --bind unix:/run/kms.sock \
+      config.wsgi:application
+  Restart=on-failure
+
+  [Install]
+  WantedBy=multi-user.target
+  
+  Asosiy farqlar:
+
+  ┌────────────────┬──────────────────┐
+  │  Oddiy Ubuntu  │     AAPanel      │
+  ├────────────────┼──────────────────┤
+  │ User=www-data  │ User=www         │
+  ├────────────────┼──────────────────┤
+  │ Group=www-data │ Group=www        │
+  ├────────────────┼──────────────────┤
+  │ /var/www/...   │ /www/wwwroot/... │
+  └────────────────┴──────────────────┘
+  
+  ---
+  AAPanel da Nginx config ham o'zgaradi
+  
+  AAPanel da Nginx ni panel orqali sozlaysiz — sites-available ga qo'lda yozmasdan.
+
+  Panel → Website → saytni tanlang → Config bo'limiga kiring va qo'shing:
+
+  location /static/ {
+      alias /www/wwwroot/172.25.25.104/kms-py/kms/static/;
+  }
+
+  location /media/ {
+      alias /www/wwwroot/172.25.25.104/kms-py/kms/media/;
+  }
+
+  location / {
+      include proxy_params;
+      proxy_pass http://unix:/run/kms.sock;
+  }
+
+  ---
+  .env fayl yo'li
+
+  /www/wwwroot/172.25.25.104/kms-py/kms/.env
+
+  ---
+  Virtual environment yaratish
+  
+  cd /www/wwwroot/172.25.25.104/kms-py/kms
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  pip install gunicorn
+  
+  ---
+  Muhim: www user huquqlari
+  
+  AAPanel www user ishlatadi, shuning uchun papkaga huquq bering:
+
+  sudo chown -R www:www /www/wwwroot/172.25.25.104/kms-py/
+  sudo chmod -R 755 /www/wwwroot/172.25.25.104/kms-py/
+
+  Shundan keyin service ni ishga tushiring:
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable kms
+  sudo systemctl start kms
+  sudo systemctl status kms
  [Unit]
   Description=KMS Django Gunicorn
   After=network.target
