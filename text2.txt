@@ -1,0 +1,16 @@
+ [Unit]
+  Description=KMS Django Gunicorn
+  After=network.target
+
+  [Service]
+  User=www
+  Group=www
+  WorkingDirectory=/www/wwwroot/172.25.25.104/kms-py/kms
+  ExecStart=/www/wwwroot/172.25.25.104/kms-py/kms/venv/bin/gunicorn \
+      --workers 3 \
+      --bind unix:/run/kms.sock \
+      config.wsgi:application
+  Restart=on-failure
+
+  [Install]
+  WantedBy=multi-user.target
