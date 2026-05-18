@@ -1,0 +1,44 @@
+● AAPanel da proxy_params fayli yo'q. Ikki yo'l bor:
+
+  Yechim 1 — proxy_params ni to'g'ridan-to'g'ri yozing (eng oson)
+
+  include proxy_params; qatorini o'chiring, o'rniga to'liq yozing:
+
+  location /static/ {
+      alias /www/wwwroot/172.25.25.104/kms-py/kms/static/;
+  }
+
+  location /media/ {
+      alias /www/wwwroot/172.25.25.104/kms-py/kms/media/;
+  }
+
+  location / {
+      proxy_pass http://unix:/run/kms.sock;
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  ---
+  Yechim 2 — proxy_params faylini yaratish
+  
+  sudo nano /www/server/nginx/conf/proxy_params
+
+  Ichiga yozing:
+
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+
+  Saqlang, keyin:
+
+  sudo /www/server/nginx/sbin/nginx -t
+  sudo /etc/init.d/nginx restart
+
+  ---
+  Tavsiya: Yechim 1 ni ishlating — soddaroq va AAPanel da muammo chiqmaydi.
+
+  Nginx config tekshirish uchun AAPanel da:
+  sudo /www/server/nginx/sbin/nginx -t
