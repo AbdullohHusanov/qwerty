@@ -91,3 +91,17 @@ server {
 - `systemctl restart gunicorn` - restart gunicorn
 - `nano /etc/nginx/sites-available/reestr` - change nginx settings
 - `nginx -t` - check nginx config files
+
+
+
+
+
+
+
+`server {
+  root /home/admin/assistant/frontend/build/;
+  index index.html;
+  server_name app.staging.assistant.io;
+  location / {
+    try_files $uri /index.html;
+  }
