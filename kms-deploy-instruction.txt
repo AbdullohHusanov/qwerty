@@ -1,0 +1,251 @@
+=====================================================================
+  KMS LOYIHASINI DEPLOY QILISH: GUNICORN + NGINX
+=====================================================================
+
+Yo'llar:
+  Backend (Django)  : /opt/kms        (ichida manage.py bor)
+  Frontend (Vue)    : /opt/kms-ui     (build natijasi: /opt/kms-ui/dist)
+  Gunicorn porti    : 127.0.0.1:8000
+
+DIQQAT: Quyida Django loyiha papkasi nomi "config" deb olingan
+(ya'ni /opt/kms/config/wsgi.py). Agar sizda boshqa nom bo'lsa
+(masalan /opt/kms/kms/wsgi.py), hamma joyda "config" so'zini
+o'sha nomga almashtiring.
+
+Tekshirish uchun:
+  ls /opt/kms/*/wsgi.py
+
+Domen o'rniga "example.uz" yozilgan. Domen bo'lmasa server IP
+manzilini yozing.
+
+
+---------------------------------------------------------------------
+1-QADAM. BACKEND: VIRTUAL MUHIT VA PAKETLAR
+---------------------------------------------------------------------
+
+cd /opt/kms
+python3.13 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install gunicorn
+
+
+---------------------------------------------------------------------
+2-QADAM. DJANGO SOZLAMALARI (settings.py)
+---------------------------------------------------------------------
+
+/opt/kms/config/settings.py faylida quyidagilarni tekshiring:
+
+DEBUG = False
+ALLOWED_HOSTS = ["example.uz", "www.example.uz", "SERVER_IP"]
+CSRF_TRUSTED_ORIGINS = ["http://example.uz", "https://example.uz"]
+
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+So'ng:
+
+python manage.py migrate
+python manage.py collectstatic --noinput
+python manage.py createsuperuser     # agar admin hali bo'lmasa
+
+Gunicorn qo'lda ishlashini tekshirish:
+
+gunicorn --bind 127.0.0.1:8000 config.wsgi:application
+
+Xato chiqmasa Ctrl+C bilan to'xtating.
+
+deactivate
+
+
+---------------------------------------------------------------------
+3-QADAM. GUNICORN SYSTEMD XIZMATI
+---------------------------------------------------------------------
+
+Faylni yarating:
+
+sudo nano /etc/systemd/system/kms.service
+
+Ichiga quyidagini yozing:
+
+----------------------- kms.service boshlanishi ---------------------
+[Unit]
+Description=KMS Django (Gunicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/kms
+ExecStart=/opt/kms/venv/bin/gunicorn \
+    --workers 3 \
+    --bind 127.0.0.1:8000 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    config.wsgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+----------------------- kms.service tugashi -------------------------
+
+Izoh: --workers soni = (CPU yadrolari x 2) + 1.
+CPU sonini bilish: nproc
+
+Huquqlarni berish va ishga tushirish:
+
+sudo chown -R www-data:www-data /opt/kms
+sudo systemctl daemon-reload
+sudo systemctl enable --now kms
+sudo systemctl status kms
+
+"active (running)" yozuvi chiqishi kerak.
+
+
+---------------------------------------------------------------------
+4-QADAM. FRONTEND BUILD
+---------------------------------------------------------------------
+
+cd /opt/kms-ui
+pnpm install
+pnpm build
+
+Natija /opt/kms-ui/dist papkasida paydo bo'ladi.
+
+Frontend API manzili "/api/..." ko'rinishida bo'lishi kerak
+(http://localhost:8000 emas). Shunda nginx so'rovni backendga
+o'zi uzatadi.
+
+Nginx dist papkasini o'qiy olishi uchun:
+
+sudo chmod -R o+rX /opt/kms-ui/dist
+sudo chmod o+x /opt /opt/kms-ui
+
+
+---------------------------------------------------------------------
+5-QADAM. NGINX SOZLASH
+---------------------------------------------------------------------
+
+sudo apt install -y nginx
+sudo nano /etc/nginx/sites-available/kms
+
+Ichiga quyidagini yozing:
+
+----------------------- nginx kms boshlanishi -----------------------
+server {
+    listen 80;
+    server_name example.uz www.example.uz;
+
+    client_max_body_size 50M;
+
+    # Frontend (Vue)
+    root /opt/kms-ui/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Backend (Django API va admin) -> Gunicorn
+    location ~ ^/(api|admin)/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    # Django static fayllar
+    location /static/ {
+        alias /opt/kms/staticfiles/;
+    }
+
+    # Django media fayllar
+    location /media/ {
+        alias /opt/kms/media/;
+    }
+}
+----------------------- nginx kms tugashi ---------------------------
+
+Izoh: "try_files ... /index.html" Vue Router history rejimi uchun
+kerak, sahifani yangilaganda 404 chiqmaydi.
+
+Agar backend URL'lari /api/ va /admin/ dan boshqa prefiks bilan
+boshlansa (masalan /auth/), uni ham qo'shing:
+    location ~ ^/(api|admin|auth)/ { ... }
+
+Yoqish:
+
+sudo ln -s /etc/nginx/sites-available/kms /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl restart nginx
+
+
+---------------------------------------------------------------------
+6-QADAM. FIREWALL VA HTTPS (ixtiyoriy, domen bo'lsa)
+---------------------------------------------------------------------
+
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+
+Bepul SSL sertifikat:
+
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d example.uz -d www.example.uz
+
+HTTPS yoqilgandan keyin settings.py ga qo'shing:
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+va: sudo systemctl restart kms
+
+
+---------------------------------------------------------------------
+7-QADAM. KOD YANGILANGANDA
+---------------------------------------------------------------------
+
+Backend:
+
+cd /opt/kms
+sudo -u www-data git pull          # yoki fayllarni nusxalang
+source venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py collectstatic --noinput
+deactivate
+sudo chown -R www-data:www-data /opt/kms
+sudo systemctl restart kms
+
+Frontend:
+
+cd /opt/kms-ui
+git pull
+pnpm install
+pnpm build
+(nginx'ni qayta ishga tushirish shart emas)
+
+
+---------------------------------------------------------------------
+LOGLAR VA XATOLAR
+---------------------------------------------------------------------
+
+sudo journalctl -u kms -f                 # Gunicorn loglari
+sudo tail -f /var/log/nginx/error.log     # Nginx xatolari
+sudo systemctl status kms                 # Gunicorn holati
+
+502 Bad Gateway        -> Gunicorn ishlamayapti: systemctl status kms
+400 Bad Request        -> domen/IP ALLOWED_HOSTS da yo'q
+403 CSRF xatosi        -> domen CSRF_TRUSTED_ORIGINS da yo'q
+403 Forbidden (front)  -> dist papkasiga huquq yo'q (4-qadamdagi chmod)
+Admin CSS yuklanmaydi  -> collectstatic bajarilmagan
+Sahifa yangilanganda 404 -> nginx'da try_files qatori yo'q
+ModuleNotFoundError    -> wsgi nomi noto'g'ri ("config" ni almashtiring)
+=====================================================================
